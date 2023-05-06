@@ -38,6 +38,3 @@ class RandomPermutation:
         return permutation
 
 
-generator = RandomPermutation()
-for i in range(10):
-    print(generator.generate(10))
