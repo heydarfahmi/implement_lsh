@@ -1,4 +1,3 @@
-
 MAX_NUMBER = 1000000000
 
 
@@ -32,16 +31,9 @@ class MinHash:
         :param p: a list defining universal hashes or permutation
         :return: signature of column
         '''
-        #TODO get max NUMBER
+        # TODO get max NUMBER
         minhash_p = MAX_NUMBER
         for i in column:
             if p[i] < minhash_p:
                 minhash_p = p[i]
         return minhash_p
-
-
-P = [[1, 2, 3, 4, 0], [3, 0, 2, 4, 1]]
-basicC = [[1, 0, 1, 1, 0], [0, 1, 1, 0, 1]]
-advanceC = [[0, 2, 3], [1, 2, 4]]
-signature = MinHash()
-print(signature.advance_sign_column(advanceC[1], P[0]))
