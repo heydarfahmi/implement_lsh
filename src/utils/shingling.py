@@ -1,25 +1,4 @@
-class ShingleSet:
-
-    def __init__(self):
-        self.shingle_set = {}
-        self.shingle_list = []
-        self.size = 0
-
-    def add(self, object):
-        result = self.shingle_set.setdefault(object, self.size)
-        if result == self.size:
-            self.size += 1
-            self.shingle_list.append(object)
-        return result
-
-    def get_index(self, index):
-        return self.shingle_list[index]
-
-    def length(self):
-        return self.size
-
-    def get(self, object):
-        return self.shingle_set.get(object)
+from src.utils.storage import ShingleSet
 
 
 class BooleanShingler:
@@ -29,8 +8,6 @@ class BooleanShingler:
         self.shingle_set = ShingleSet()
         self.shingle_index = set()
         self.document_shingles = []
-        if path:
-            self.load_shingle()
 
     def boolean_vector_shingling(self, documents):
         """
@@ -51,7 +28,8 @@ class BooleanShingler:
                 boolean_vector.add(shingle_set.add(shingle))
             text_sets.append(text_set)
             vectors.append(list(boolean_vector))
-
+        self.shingle_set = shingle_set
+        self.document_shingles = vectors
         return text_sets, vectors, shingle_set
 
     def kgram_shingling_single_text(self, text):
@@ -69,9 +47,3 @@ class BooleanShingler:
             shingles.add(shingle)
 
         return shingles
-
-    def save_shingle(self):
-        pass
-
-    def load_shingle(self):
-        pass
