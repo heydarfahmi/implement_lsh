@@ -2,7 +2,7 @@ import random
 
 
 class RandomPermutation:
-    def __init__(self, type: str = 'type1', prime: int = 13):
+    def __init__(self, type: str = 'type1', prime: int = 4294967311):
         if type == 'type1':  # TODO Mkae
             self.generate = self._generator1
         elif type == 'type2':
