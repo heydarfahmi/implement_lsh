@@ -51,8 +51,7 @@ class MinHash:
         :return: 2D array containing the signature of the class matrix
        '''
         p_generator = RandomPermutation()
-        self._permutations = [p_generator.generate(p_size) for i in range(self.n_permutations)]
-        print(self._permutations)
+        self._permutations = [p_generator.generate(p_size) for _ in range(self.n_permutations)]
         self._matrix_signature = self._sign_coordinate_matrix(
             coordinate_matrix, self._permutations)
 
