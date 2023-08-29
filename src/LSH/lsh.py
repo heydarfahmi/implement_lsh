@@ -16,7 +16,6 @@ class LSH(object):
         self.b = b
         self.r = r
         self._num_perm = r * b
-        self._hash_func = self._byteswap
         self._hashranges = [(i * r, (i + 1) * r) for i in range(b)]
         self.hashtables = [
             DictSetStorage()
@@ -26,7 +25,7 @@ class LSH(object):
 
     def _insert(self, vector, key):
         Hs = [self._hash_func(vector[start:end])
-              for start, end in self.hashranges]
+              for start, end in self._hashranges]
         self.keys.insert(key, *Hs)
         for H, hashtable in zip(Hs, self.hashtables):
             hashtable.insert(H, key)
@@ -135,7 +134,7 @@ class LSH(object):
             raise ValueError("Expecting a vector with length %d, got %d"
                              % (self._num_perm, len(vector_signature)))
         candidates = set()
-        for (start, end), hashtable in zip(self.hashranges, self.hashtables):
+        for (start, end), hashtable in zip(self._hashranges, self.hashtables):
             _H = self._hash_func(vector_signature[start:end])
             for pid in hashtable.get(_H):
                 candidates.add(pid)

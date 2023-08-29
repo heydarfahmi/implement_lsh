@@ -24,8 +24,8 @@ def _optimal_param(threshold, num_perm, fp_weight,
     for b in range(1, num_perm + 1):
         max_r = int(num_perm / b)
         # Todo just compute those that b*r==num_perm
-        if max_r * b == num_perm:
-            continue
+        # if max_r * b != num_perm:
+        #     continue
         for r in range(1, max_r + 1):
             fp = _false_positive_probability(threshold, b, r)
             fn = _false_negative_probability(threshold, b, r)

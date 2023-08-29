@@ -111,7 +111,7 @@ class DictListStorage(Storage):
         return key in self._dict
 
 
-class DictSetStorage(Storage, DictListStorage):
+class DictSetStorage(DictListStorage):
     '''This is a wrapper class around ``defaultdict(set)`` enabling
     it to support an API consistent with `Storage`
     '''
