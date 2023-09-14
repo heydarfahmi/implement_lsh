@@ -3,14 +3,34 @@ import numbers
 import pickle
 import random
 import time
+from collections import defaultdict
+from itertools import chain
 
 import numpy as np
-from scipy.sparse import issparse
-from sklearn.metrics.pairwise import euclidean_distances
+from scipy.sparse import csr_matrix, issparse
+
+from src.LSH.lsh import LSH
 
 
+def jaccard_dissimilarity(a, b, **_):
+    return np.array([sum(b != aa) for aa in a])
 
 
+def cosine_dissimilarity():
+    pass
+
+
+def get_max_value_key(dic):
+    """Gets the key for the maximum value in a dict."""
+    v = np.array(list(dic.values()))
+    k = np.array(list(dic.keys()))
+
+    maxima = np.where(v == np.max(v))[0]
+    if len(maxima) == 1:
+        return k[maxima[0]]
+    # In order to be consistent, always selects the minimum key
+    # (guaranteed to be unique) when there are multiple maximum values.
+    return k[maxima[np.argmin(k[maxima])]]
 
 
 def get_unique_rows(a):
@@ -102,8 +122,47 @@ def _assign_clusters(X, centroids, membership_matrix, centroids_number, fdissimi
     return labels, centroids_number, membership_matrix, moves, costs
 
 
-def _kmeans(X, n_clusters, n_points, n_attrs, max_iter, fdissimilarity, init, init_no,
-            verbose, random_state, save, save_dir='.'):
+def _assign_bucket_clusters(X, lsh_index, bucket_clusters, centroids, membership_matrix, centroids_number,
+                            fdissimilarity, labels):
+    moves = 0
+    costs = 0
+    for ipoint, curpoint in enumerate(X):
+        short_list = []
+        for bucket_index, bucket in enumerate(lsh_index.keys[ipoint]):
+            short_list.append(bucket_clusters[bucket_index][bucket])
+
+        to_diss = np.array(list(chain(*short_list)))
+        diss = fdissimilarity(centroids[to_diss], curpoint)
+        _clust = np.argmin(diss)
+        costs += diss[_clust]
+        clust = to_diss[_clust]
+
+        if membership_matrix[clust, ipoint]:
+            continue
+        moves += 1
+
+        membership_matrix[labels[ipoint], ipoint] = 0
+        membership_matrix[clust, ipoint] = 1
+
+        centroids_number[labels[ipoint]] -= 1
+        centroids_number[clust] += 1
+
+        labels[ipoint] = clust
+
+    return labels, centroids_number, membership_matrix, moves, costs
+
+
+def query_short_list(X, lsh_index: LSH, labels):
+    bucket_short_list = [defaultdict(set) for _ in range(lsh_index.b)]
+    for ipoint, point in enumerate(X):
+        for bucket_index, hash in enumerate(lsh_index.keys[ipoint]):
+            bucket_short_list[bucket_index][hash].add(labels[ipoint])
+
+    return bucket_short_list
+
+
+def _mhkmeans(X, lsh_index, n_clusters, n_points, n_attrs, max_iter, fdissimilarity, init, init_no,
+              verbose, random_state, save, save_dir='.'):
     random_state = get_random_state(random_state)
     # _____ INIT STEP_____
     if verbose:
@@ -167,8 +226,8 @@ def _kmeans(X, n_clusters, n_points, n_attrs, max_iter, fdissimilarity, init, in
     labels, centroids_number, membership_matrix, moves, cost = _assign_clusters(X, centroids, membership_matrix,
                                                                                 centroids_number, fdissimilarity,
                                                                                 labels)
-
     end_time = time.time()
+
     # _____ ITERATION _____
     if verbose:
         print("Starting iterations...")
@@ -187,7 +246,7 @@ def _kmeans(X, n_clusters, n_points, n_attrs, max_iter, fdissimilarity, init, in
 
     itr = 0
     converged = False
-
+    scape_pulse = False
     epoch_costs = [cost]
     while itr < max_iter and not converged:
         itr += 1
@@ -204,20 +263,37 @@ def _kmeans(X, n_clusters, n_points, n_attrs, max_iter, fdissimilarity, init, in
         centroids = _update_centroids(X, n_clusters, centroids_number, labels)
 
         update_time_step = time.time()
+        if not scape_pulse:
+            bucket_clusters = query_short_list(X, lsh_index, labels)
+            labels, centroids_number, membership_matrix, _moves, ncost = _assign_bucket_clusters(X, lsh_index,
+                                                                                                 bucket_clusters,
+                                                                                                 centroids,
+                                                                                                 membership_matrix,
+                                                                                                 centroids_number,
+                                                                                                 fdissimilarity,
+                                                                                                 labels)
+        else:
+            labels, centroids_number, membership_matrix, _moves, ncost = _assign_clusters(X,
+                                                                                          centroids,
+                                                                                          membership_matrix,
+                                                                                          centroids_number,
+                                                                                          fdissimilarity,
+                                                                                          labels)
 
-        labels, centroids_number, membership_matrix, _moves, ncost = _assign_clusters(X, centroids, membership_matrix,
-                                                                                      centroids_number, fdissimilarity,
-                                                                                      labels)
         moves += _moves
         iter_time_end = time.time()
 
         # All points seen in this iteration
-        converged = (moves == 0) or (ncost >= cost)
+        _converged = (moves == 0) or (ncost >= cost)
+        # TEST
+        converged = scape_pulse and _converged
+        scape_pulse = _converged
+
         epoch_costs.append(ncost)
         cost = ncost
         if verbose:
             print(f"Run {init_no + 1}, iteration: {itr}/{max_iter}, "
-                  f"moves: {moves}, cost: {cost} in {iter_time_end - iter_time_start}")
+                  f"moves: {moves}, cost: {cost} in {iter_time_end - iter_time_start} seconds")
 
         if save == 'data':
             rdata = {'step': itr, 'init_no': init_no + 1, 'cost': cost, 'moves': 0,
@@ -231,14 +307,15 @@ def _kmeans(X, n_clusters, n_points, n_attrs, max_iter, fdissimilarity, init, in
                      'perform_step_time': perform_time_step - iter_time_start,
                      'update_centroid_time': update_time_step - perform_time_step,
                      'step_time': iter_time_end - iter_time_start}
+
             with open(f'{save_dir}/{init_no}_{itr}.json', 'w') as f:
                 f.write(json.dumps(rtime))
 
     return centroids, labels, cost, itr, epoch_costs
 
 
-def kmeans(X, n_clusters, max_iter, fdissimilarity, init, n_init, verbose, random_state, save, save_dir
-           ):
+def mhkmeans(X, lsh_index, n_clusters, max_iter, fdissimilarity, init, n_init, verbose, random_state, save, save_dir
+             ):
     """k-modes algorithm"""
     random_state = get_random_state(random_state)
 
@@ -261,8 +338,8 @@ def kmeans(X, n_clusters, max_iter, fdissimilarity, init, n_init, verbose, rando
     results = []
     seeds = random_state.randint(np.iinfo(np.int32).max, size=n_init)
     for init_no in range(n_init):
-        results.append(_kmeans(
-            X, n_clusters, n_points, n_attrs, max_iter, fdissimilarity, init, init_no,
+        results.append(_mhkmeans(
+            X, lsh_index, n_clusters, n_points, n_attrs, max_iter, fdissimilarity, init, init_no,
             verbose, seeds[init_no], save, save_dir
         ))
 
@@ -278,13 +355,12 @@ def kmeans(X, n_clusters, max_iter, fdissimilarity, init, n_init, verbose, rando
 
 class Kmeans:
 
-    def __init__(self, n_clusters=8, max_iteration=100, dissimilarity=euclidean_distances,
+    def __init__(self, n_clusters=8, max_iteration=100, dissimilarity='jaccard',
                  init='random', random_state=None, n_init=10, **kwargs):
         self.n_clusters = n_clusters
         self.max_iter = max_iteration
         self.dissimilarity = dissimilarity
         self.init = init
-        self.n_init = n_init
         self.random_state = random_state
         self.verbose = kwargs.get('verbose', False)
         self.save = kwargs.get('save')
@@ -306,7 +382,7 @@ class Kmeans:
         random_state = get_random_state(self.random_state)
 
         (self._enc_cluster_centroids, self._enc_map, self.labels_, self.cost_,
-         self.n_iter_, self.epoch_costs_) = kmeans(
+         self.n_iter_, self.epoch_costs_) = mhkmeans(
             X,
             self.n_clusters,
             self.max_iter,
