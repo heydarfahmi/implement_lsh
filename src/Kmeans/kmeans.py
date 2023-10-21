@@ -11,7 +11,6 @@ import numpy as np
 from scipy.sparse import issparse
 from sklearn.metrics.pairwise import euclidean_distances
 from sklearn.utils.validation import check_array
-from sklearn.utils.extmath import stable_cumsum
 
 
 def _is_arraylike(x):
@@ -49,62 +48,25 @@ def _kmeans_plusplus(X, n_clusters, random_state, fdissimilarity):
        """
     n_points, n_attr = X.shape
 
-    centers = np.empty((n_clusters, n_attr), dtype=X.dtype)
-    pass
-    # # Pick first center randomly and track index of point
-    #
-    # center_id = random_state.choice(n_points, p=1 / n_points)
-    # indices = np.full(n_clusters, -1, dtype=int)
-    # if issparse(X):
-    #     centers[0] = X[center_id].toarray()
-    # else:
-    #     centers[0] = X[center_id]
-    # indices[0] = center_id
-    #
-    # # Initialize list of closest distances and calculate current potential
-    # closest_dist_sq = fdissimilarity(
-    #     centers[0, np.newaxis], X)
-    # current_pot = closest_dist_sq
-    #
-    # # Pick the remaining n_clusters-1 points
-    # for c in range(1, n_clusters):
-    #     for ipoint, curpoint in enumerate(X):
-    #         diss = fdissimilarity(centroids, curpoint)
-    #         clust = np.argmin(diss)
-    #         costs += diss[clust]
-    #     #
-    #     Choose center candidates by sampling with probability proportional
-    #     # to the squared distance to the closest existing center
-    #     rand_vals = random_state.uniform(size=n_local_trials) * current_pot
-    #     candidate_ids = np.searchsorted(
-    #         stable_cumsum(closest_dist_sq), rand_vals
-    #     )
-    #     # XXX: numerical imprecision can result in a candidate_id out of range
-    #     np.clip(candidate_ids, None, closest_dist_sq.size - 1, out=candidate_ids)
-    #
-    #     # Compute distances to center candidates
-    #     distance_to_candidates = _euclidean_distances(
-    #         X[candidate_ids], X, Y_norm_squared=x_squared_norms, squared=True
-    #     )
-    #
-    #     # update closest distances squared and potential for each candidate
-    #     np.minimum(closest_dist_sq, distance_to_candidates, out=distance_to_candidates)
-    #     candidates_pot = distance_to_candidates @ sample_weight.reshape(-1, 1)
-    #
-    #     # Decide which candidate is the best
-    #     best_candidate = np.argmin(candidates_pot)
-    #     current_pot = candidates_pot[best_candidate]
-    #     closest_dist_sq = distance_to_candidates[best_candidate]
-    #     best_candidate = candidate_ids[best_candidate]
-    #
-    #     # Permanently add best center candidate found in local tries
-    #     if issparse(X):
-    #         centers[c] = X[best_candidate].toarray()
-    #     else:
-    #         centers[c] = X[best_candidate]
-    #     indices[c] = best_candidate
-    #
-    # return centers, indices
+    centroids = np.empty((n_clusters, n_attr), dtype=X.dtype)
+    # Pick first center randomly and track index of point
+    center_id = random_state.choice(n_points, p=1 / n_points)
+
+    if issparse(X):
+        centroids[0] = X[center_id].toarray()
+    else:
+        centroids[0] = X[center_id]
+
+    k_selected = 1
+    dist_from_centers = np.array([0 for _ in range(n_points)])
+    while k_selected < n_clusters:
+        for ipoint, curpoint in enumerate(X):
+            _diss = fdissimilarity(centroids[:k_selected-1, np.newaxis], curpoint)
+            dist_from_centers[ipoint]= np.min(_diss)
+        centroids[k_selected]=X[np.argmax(dist_from_centers)].to_array()
+        k_selected += 1
+
+    return centroids
 
 
 def get_unique_rows(a):
@@ -430,7 +392,7 @@ class Kmeans:
     Examples
     --------
 
-    >>> from sklearn.cluster import KMeans
+    >>> from Kmeans.kmeans import KMeans
     >>> import numpy as np
     >>> X = np.array([[1, 2], [1, 4], [1, 0],
     ...               [10, 2], [10, 4], [10, 0]])
