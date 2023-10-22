@@ -50,7 +50,7 @@ def _kmeans_plusplus(X, n_clusters, random_state, fdissimilarity):
 
     centroids = np.empty((n_clusters, n_attr), dtype=X.dtype)
     # Pick first center randomly and track index of point
-    center_id = random_state.choice(n_points, p=1 / n_points)
+    center_id = random_state.choice(n_points)
 
     if issparse(X):
         centroids[0] = X[center_id].toarray()
@@ -61,12 +61,12 @@ def _kmeans_plusplus(X, n_clusters, random_state, fdissimilarity):
     dist_from_centers = np.array([0 for _ in range(n_points)])
     while k_selected < n_clusters:
         for ipoint, curpoint in enumerate(X):
-            _diss = fdissimilarity(centroids[:k_selected-1, np.newaxis], curpoint)
+            _diss = fdissimilarity(centroids[:k_selected, :], curpoint)
             dist_from_centers[ipoint]= np.min(_diss)
-        centroids[k_selected]=X[np.argmax(dist_from_centers)].to_array()
+        centroids[k_selected]=X[np.argmax(dist_from_centers)].toarray()
         k_selected += 1
 
-    return centroids
+    return np.array(centroids)
 
 
 def get_unique_rows(a):
@@ -453,10 +453,10 @@ class Kmeans:
             self._validate_center_shape(X, init)
 
         # Todo add lsh Algorithm Here
-        if self._algorithm == "lsh++":
-            pass
-        else:
-            pass
+        # if self._algorithm == "lsh++":
+        #     pass
+        # else:
+        #     pass
 
         ###### KMEANS ALGORITHM #################################
 
@@ -464,8 +464,9 @@ class Kmeans:
 
         results = []
         seeds = random_state.randint(np.iinfo(np.int32).max, size=self.n_init)
-        for init_no in range(self.init):
+        for init_no in range(self.n_init):
             start_initialization_centroid = time.time()
+            print("Init: initializing centers")
             centroids = self._init_centroids(
                 X,
                 init=init,
@@ -477,8 +478,9 @@ class Kmeans:
                 with open(f'{self.save_dir}/{init_no}_centers_inital.json', 'w') as f:
                     f.write(json.dumps(rtime))
 
+
             results.append(_kmeans(
-                X, self.n_clusters, n_points, self.max_iter, self.fdissimilarity, centroids, init_no,
+                X, self.n_clusters, n_points, self.max_iter, self.dissimilarity, centroids, init_no,
                 verbose, seeds[init_no], self.save, self.save_dir
             ))
 
@@ -564,13 +566,12 @@ class Kmeans:
         if isinstance(init, str) and init.lower() == 'lsh++':
             pass
         elif isinstance(init, str) and init.lower() == 'kmeans++':
-            # TODO centroids, _ = _kmeans_plusplus(
-            #     X,
-            #     n_clusters,
-            #     random_state=random_state,
-            #     x_squared_norms=x_squared_norms,
-            #     sample_weight=sample_weight,
-            # )
+            centroids= _kmeans_plusplus(
+                X,
+                n_clusters,
+                random_state=random_state,
+                fdissimilarity=self.dissimilarity
+            )
             pass
 
         elif isinstance(init, str) and init.lower() == 'random':
