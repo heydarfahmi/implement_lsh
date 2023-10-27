@@ -8,8 +8,15 @@ from itertools import chain
 
 import numpy as np
 from scipy.sparse import csr_matrix, issparse
+from sklearn.utils.validation import check_array
 
+from src.Kmeans.kmeans import Kmeans
 from src.LSH.lsh import LSH
+
+
+def _is_arraylike(x):
+    """Returns whether the input is array-like and not a scalar."""
+    return (hasattr(x, "__len__") or hasattr(x, "shape") or hasattr(x, "__array__")) and not np.isscalar(x)
 
 
 def jaccard_dissimilarity(a, b, **_):
@@ -131,7 +138,8 @@ def _assign_bucket_clusters(X, lsh_index, bucket_clusters, centroids, membership
         for bucket_index, bucket in enumerate(lsh_index.keys[ipoint]):
             short_list.append(bucket_clusters[bucket_index][bucket])
 
-        to_diss = np.array(list(chain(*short_list)))
+        to_diss=list(chain(*short_list))
+        to_diss = np.array(to_diss) if len(to_diss)>0 else np.array([labels[ipoint]])
         diss = fdissimilarity(centroids[to_diss], curpoint)
         _clust = np.argmin(diss)
         costs += diss[_clust]
@@ -161,46 +169,10 @@ def query_short_list(X, lsh_index: LSH, labels):
     return bucket_short_list
 
 
-def _mhkmeans(X, lsh_index, n_clusters, n_points, n_attrs, max_iter, fdissimilarity, init, init_no,
+def _mhkmeans(X, lsh_index, n_clusters, n_points, max_iter, fdissimilarity, centroids, init_no,
               verbose, random_state, save, save_dir='.'):
     random_state = get_random_state(random_state)
     # _____ INIT STEP_____
-    if verbose:
-        print("Init: initializing centroids")
-    if isinstance(init, str) and init.lower() == 'lsh++':
-        pass
-    elif isinstance(init, str) and init.lower() == 'kmeans++':
-        pass
-    elif isinstance(init, str) and init.lower() == 'random':
-        sample_weight = np.ones(n_points, dtype=X.dtype)
-        seeds = random_state.choice(
-            n_points,
-            size=n_clusters,
-            replace=False,
-            p=sample_weight / sample_weight.sum(),
-        )
-        centroids = X[seeds]
-    elif hasattr(init, '__array__'):
-        # Make sure init is a 2D array.
-        if len(init.shape) == 1:
-            init = np.atleast_2d(init).T
-        assert init.shape[0] == n_clusters, \
-            f"Wrong number of initial centroids in init ({init.shape[0]}, " \
-            f"should be {n_clusters})."
-        assert init.shape[1] == n_attrs, \
-            f"Wrong number of attributes in init ({init.shape[1]}, " \
-            f"should be {n_attrs})."
-        centroids = np.asarray(init, dtype=np.uint16)
-    else:
-        raise NotImplementedError
-
-    if issparse(X):
-        centroids = centroids.toarray()
-
-    else:
-        # todo convert X to sparse array
-        pass
-
     if verbose:
         print("Init: initializing clusters")
 
@@ -216,7 +188,6 @@ def _mhkmeans(X, lsh_index, n_clusters, n_points, n_attrs, max_iter, fdissimilar
         membership_matrix[clust, ipoint] = 1
         centroids_number[clust] += 1
         labels[ipoint] = clust
-
     labels, centroids_number, membership_matrix, centroids, moves = perform_empty_clusters(X, n_clusters, random_state,
                                                                                            centroids,
                                                                                            membership_matrix,
@@ -314,101 +285,190 @@ def _mhkmeans(X, lsh_index, n_clusters, n_points, n_attrs, max_iter, fdissimilar
     return centroids, labels, cost, itr, epoch_costs
 
 
-def mhkmeans(X, lsh_index, n_clusters, max_iter, fdissimilarity, init, n_init, verbose, random_state, save, save_dir
-             ):
-    """k-modes algorithm"""
-    random_state = get_random_state(random_state)
+class MHKmeans(Kmeans):
+    """MinHash K-Means clustering.
 
-    # Todo assert if X has true instances
+    Read more in the :ref:`User Guide <k_means>`.
 
-    n_points, n_attrs = X.shape
-    assert n_clusters <= n_points, f"Cannot have more clusters ({n_clusters}) " \
-                                   f"than data points ({n_points})."
+    Parameters
+    ----------
 
-    # Are there more n_clusters than unique rows? Then set the unique
-    # rows as initial values and skip iteration.
-    unique = get_unique_rows(X)
-    n_unique = unique.shape[0]
-    if n_unique <= n_clusters:
-        max_iter = 0
-        n_init = 1
-        n_clusters = n_unique
-        init = unique
+    n_clusters : int, default=8
+        The number of clusters to form as well as the number of
+        centroids to generate.
 
-    results = []
-    seeds = random_state.randint(np.iinfo(np.int32).max, size=n_init)
-    for init_no in range(n_init):
-        results.append(_mhkmeans(
-            X, lsh_index, n_clusters, n_points, n_attrs, max_iter, fdissimilarity, init, init_no,
-            verbose, seeds[init_no], save, save_dir
-        ))
+    init : {'k-means++', 'random'}, callable or array-like of shape \
+            (n_clusters, n_features), default='k-means++'
+        Method for initialization:
 
-    all_centroids, all_labels, all_costs, all_n_iters, all_epoch_costs = zip(*results)
+        'k-means++' : selects initial cluster centroids using sampling based on
+        an empirical probability distribution of the points' contribution to the
+        overall inertia. This technique speeds up convergence. The algorithm
+        implemented is "greedy k-means++". It differs from the vanilla k-means++
+        by making several trials at each sampling step and choosing the best centroid
+        among them.
 
-    best = np.argmin(all_costs)
-    if n_init > 1 and verbose:
-        print(f"Best run was number {best + 1}")
+        'random': choose `n_clusters` observations (rows) at random from data
+        for the initial centroids.
 
-    return all_centroids[best], all_labels[best], \
-        all_costs[best], all_n_iters[best], all_epoch_costs[best]
+        If an array is passed, it should be of shape (n_clusters, n_features)
+        and gives the initial centers.
 
 
-class Kmeans:
+    n_init :  int, default=10
+        Number of times the k-means algorithm is run with different centroid
+        seeds. The final results is the best output of `n_init` consecutive runs
+        in terms of inertia. Several runs are recommended for sparse
+        high-dimensional problems (see :ref:`kmeans_sparse_high_dim`).
 
-    def __init__(self, n_clusters=8, max_iteration=100, dissimilarity='jaccard',
-                 init='random', random_state=None, n_init=10, **kwargs):
-        self.n_clusters = n_clusters
-        self.max_iter = max_iteration
-        self.dissimilarity = dissimilarity
-        self.init = init
-        self.random_state = random_state
-        self.verbose = kwargs.get('verbose', False)
-        self.save = kwargs.get('save')
-        self.save_dir = kwargs.get('save_dir')
+        n_init could change depends on the value of init:
+        5 if using `init='random'` ;
+        1 if using `init='k-means++'` or `init` is an array-like.
 
-    def fit(self, X, **kwargs):
+
+    max_iter : int, default=100
+        Maximum number of iterations of the k-means algorithm for a
+        single run.
+
+
+    verbose : int, default=0
+        Verbosity mode.
+
+    random_state : int, RandomState instance or None, default=None
+        Determines random number generation for centroid initialization. Use
+        an int to make the randomness deterministic.
+        See :term:`Glossary <random_state>`.
+
+
+    Attributes
+    ----------
+    cluster_centers_ : ndarray of shape (n_clusters, n_features)
+        Coordinates of cluster centers. If the algorithm stops before fully
+        converging (see ``tol`` and ``max_iter``), these will not be
+        consistent with ``labels_``.
+
+    labels_ : ndarray of shape (n_samples,)
+        Labels of each point
+
+    inertia_ : float
+        Sum of squared distances of samples to their closest cluster center,
+        weighted by the sample weights if provided.
+
+    cost_ : float
+        equal to interia_.
+
+    n_iter_ : int
+        Number of iterations run.
+
+
+
+
+    In practice, the k-means algorithm is very fast (one of the fastest
+    clustering algorithms available), but it falls in local minima. That's why
+    it can be useful to restart it several times.
+
+    If the algorithm stops before fully converging (because of ``tol`` or
+    ``max_iter``), ``labels_`` and ``cluster_centers_`` will not be consistent,
+    i.e. the ``cluster_centers_`` will not be the means of the points in each
+    cluster. Also, the estimator will reassign ``labels_`` after the last
+    iteration to make ``labels_`` consistent with ``predict`` on the training
+    set.
+
+    Examples
+    --------
+
+    >>> from Kmeans.kmeans import KMeans
+    >>> import numpy as np
+    >>> X = np.array([[1, 2], [1, 4], [1, 0],
+    ...               [10, 2], [10, 4], [10, 0]])
+    >>> kmeans = KMeans(n_clusters=2, random_state=0, n_init="auto").fit(X)
+    >>> kmeans.labels_
+    array([1, 1, 1, 0, 0, 0], dtype=int32)
+    >>> kmeans.predict([[0, 0], [12, 3]])
+    array([1, 0], dtype=int32)
+    >>> kmeans.cluster_centers_
+    array([[10.,  2.],
+           [ 1.,  2.]])
+    """
+
+    def __init__(self, **kwargs):
+        super().__init__(**kwargs)
+
+    def fit(self, X, lsh, **kwargs):
         """Compute k-means clustering.
 
-          Parameters
-          ----------
-          X : array-like, shape=[n_samples, n_features]
+        Parameters
+        ----------
+        X : {array-like, sparse matrix} of shape (n_samples, n_features)
+            Training instances to cluster. It must be noted that the data
+            will be converted to C ordering, which will cause a memory
+            copy if the given data is not C-contiguous.
+            If a sparse matrix is passed, a copy will be made if it's not in
+            CSR format.
 
-          The weight that is assigned to each individual data point when
-          updating the centroids.
-          """
 
-        # TODO check if X i numpy
+        Returns
+        -------
+        self : object
+            Fitted estimator.
+        """
+
+        ####VALDIATING #####
+        verbose = self.verbose
+        X = super()._validate_data(X)
+
+        super()._check_params_vs_input(X)
 
         random_state = get_random_state(self.random_state)
 
-        (self._enc_cluster_centroids, self._enc_map, self.labels_, self.cost_,
-         self.n_iter_, self.epoch_costs_) = mhkmeans(
-            X,
-            self.n_clusters,
-            self.max_iter,
-            self.dissimilarity,
-            self.init,
-            self.n_init,
-            self.verbose,
-            random_state,
-            self.save,
-            self.save_dir)
+        # Validate init array
+        init = self.init
+        init_is_array_like = _is_arraylike(init)
+        if init_is_array_like:
+            init = check_array(init, dtype=X.dtype, copy=True, order="C")
+            super()._validate_center_shape(X, init)
+
+        # Todo add lsh Algorithm Here
+        # if self._algorithm == "lsh++":
+        #     pass
+        # else:
+        #     pass
+
+        ###### KMEANS ALGORITHM #################################
+
+        n_points, n_attrs = X.shape
+
+        results = []
+        seeds = random_state.randint(np.iinfo(np.int32).max, size=self.n_init)
+        for init_no in range(self.n_init):
+            start_initialization_centroid = time.time()
+            print("Init: initializing centers")
+            centroids = super()._init_centroids(
+                X,
+                init=init,
+                random_state=random_state,
+            )
+            if self.save == 'timing' or self.save == 'data':
+                rtime = {'step': 'initalization', 'init_no': init_no + 1,
+                         'step_time': time.time() - start_initialization_centroid}
+                with open(f'{self.save_dir}/{init_no}_centers_inital.json', 'w') as f:
+                    f.write(json.dumps(rtime))
+
+            results.append(_mhkmeans(
+                X, lsh, self.n_clusters, n_points, self.max_iter, self.dissimilarity, centroids, init_no,
+                verbose, seeds[init_no], self.save, self.save_dir
+            ))
+
+        all_centroids, all_labels, all_costs, all_n_iters, all_epoch_costs = zip(*results)
+
+        best = np.argmin(all_costs)
+        if self.n_init > 1 and verbose:
+            print(f"Best run was number {best + 1}")
+        self.cluster_centers_ = all_centroids[best]
+        self.labels_ = all_labels[best]
+        self.inertia_ = all_costs[best]
+        self.cost_ = all_costs[best]
+        self.n_iter_ = all_n_iters[best]
+        self.epoch_costs_ = all_epoch_costs[best]
+
         return self
-
-    def fit_predict(self, X, y=None, **kwargs):
-        """Compute cluster centroids and predict cluster index for each sample.
-
-        Convenience method; equivalent to calling fit(X) followed by
-        predict(X).
-        """
-        return self.fit(X, **kwargs).predict(X, **kwargs)
-
-    def predict(self, X, **kwargs):
-        assert hasattr(self, '_enc_cluster_centroids'), "Model not yet fitted."
-
-        # todo check array
-        return labels_cost(X, self._enc_cluster_centroids, self.cat_dissim)[0]
-
-    @property
-    def cluster_centroids_(self):
-        pass

@@ -9,7 +9,7 @@ class BooleanShingler:
         self.shingle_index = set()
         self.document_shingles = []
 
-    def boolean_vector_shingling(self, documents):
+    def coordinate_vector_shingling(self, documents):
         """
             Implements k-gram word-based shingling for a list of texts and k value.
             Returns a list of text set ,boolean vectors and shingles and all words set.
@@ -21,13 +21,13 @@ class BooleanShingler:
         for text in documents:
             words = text.split()
             text_set = set()
-            boolean_vector = set()
+            coordinate_vector = set()
             for i in range(len(words) - k + 1):
                 shingle = ' '.join(words[i:i + k])
                 text_set.add(shingle)
-                boolean_vector.add(shingle_set.add(shingle))
+                coordinate_vector.add(shingle_set.add(shingle))
             text_sets.append(text_set)
-            vectors.append(list(boolean_vector))
+            vectors.append(list(coordinate_vector))
         self.shingle_set = shingle_set
         self.document_shingles = vectors
         return text_sets, vectors, shingle_set

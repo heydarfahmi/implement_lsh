@@ -491,7 +491,7 @@ class Kmeans:
             print(f"Best run was number {best + 1}")
         self.cluster_centers_ = all_centroids[best]
         self.labels_ = all_labels[best]
-        self.interia_ = all_costs[best]
+        self.inertia_ = all_costs[best]
         self.cost_ = all_costs[best]
         self.n_iter_ = all_n_iters[best]
         self.epoch_costs_ = all_epoch_costs[best]

@@ -148,3 +148,27 @@ class ShingleSet:
 
     def get(self, object):
         return self.shingle_set.get(object)
+
+
+class HashNodeSet:
+
+    def __init__(self):
+        self.hash_node_set = {}
+        self.node_list = []
+        self.size = 0
+
+    def add(self, object):
+        result = self.hash_node_set.setdefault(object, self.size)
+        if result == self.size:
+            self.size += 1
+            self.node_list.append(object)
+        return result
+
+    def get_index(self, index):
+        return self.node_list[index]
+
+    def length(self):
+        return self.size
+
+    def get(self, object):
+        return self.hash_node_set.get(object)

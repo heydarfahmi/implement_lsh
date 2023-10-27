@@ -1,3 +1,4 @@
+import random
 from collections import defaultdict
 from scipy import sparse
 import numpy as np
@@ -110,8 +111,8 @@ def _assign_clusters(X, centroids, membership_matrix, fdissimilarity, labels):
     return labels, membership_matrix, moves, cost
 
 
-def _ckmodes(X, n_clusters, n_points, n_attrs, max_iter, fdissimilarity, init, init_no,
-             verbose, random_state, save, save_dir='.'):
+def _lshkmodes(X, n_clusters,Freq,lsh, n_points, n_attrs, max_iter, fdissimilarity, init, init_no,
+               verbose, random_state, save, save_dir='.'):
     random_state = get_random_state(random_state)
     # _____ INIT STEP_____
     if verbose:
@@ -149,7 +150,8 @@ def _ckmodes(X, n_clusters, n_points, n_attrs, max_iter, fdissimilarity, init, i
     centroids_num = [0 for _ in range(n_clusters)]
     labels = np.empty(n_points, dtype=np.uint16)
     cost = 0
-
+    cl_attr_freq = [defaultdict(int)
+                    for _ in range(n_clusters)]
     for ipoint, curpoint in enumerate(X):
         # Initial assignment to clusters
         diss = fdissimilarity(centroids, curpoint, X=X, membship=membership_matrix)
@@ -158,10 +160,29 @@ def _ckmodes(X, n_clusters, n_points, n_attrs, max_iter, fdissimilarity, init, i
         centroids_num[clust] += 1
         membership_matrix[clust, ipoint] = 1
         labels[ipoint] = clust
-    centroids, _cluster_attrs = _update_centroids(X, centroids_num, n_clusters, labels)
+        for curattr in curpoint:
+            cl_attr_freq[clust][curattr] += 1
+
+    for ik in range(n_clusters):
+        if sum(membership_matrix[ik]) == 0:
+            print('HERE')
+            centroids[ik] = set()
+            for iattr in range(n_attrs):
+                # Empty centroid, choose randomly
+                # centroids[ik, iattr] = random_state.choice(X[:, iattr])
+                add_iattr = random.choices([0, 1], [n_points-Freq[iattr], Freq[iattr]], k=1)[0]
+                if add_iattr:
+                    centroids[ik].add(iattr)
+
+        else:
+            centroids[ik] = {attr
+                             for attr, attr_freq in cl_attr_freq[ik].items()
+                             if attr_freq > (centroids_num[ik] / 2)}
+    # centroids, _cluster_attrs = _update_centroids(X, centroids_num, n_clusters, labels)
     # _moves, _ncost = perform_empty_clusters(X, n_clusters, random_state, centroids, membership_matrix,
     #                                         fdissimilarity)
-
+    print('len',len(set(([frozenset(i) for i in centroids]))))
+    # print((set(([frozenset(i) for i in centroids]))))
     end_time = time.time()
     # _____ ITERATION _____
     if verbose:
@@ -253,7 +274,7 @@ def ck_modes(X, n_clusters, max_iter, fdissimilarity, init, n_init, verbose, ran
     results = []
     seeds = random_state.randint(np.iinfo(np.int32).max, size=n_init)
     for init_no in range(n_init):
-        results.append(_ckmodes(
+        results.append(_lshKModes(
             X, n_clusters, n_points, n_attrs, max_iter, fdissimilarity, init, init_no,
             verbose, seeds[init_no], save, save_dir
         ))
@@ -337,6 +358,6 @@ if __name__ == '__main__':
         {2, 3}
     ]
     n_points, n_attrs = 5, 4
-    _ckmodes(data2, 2, n_points, n_attrs, 10,
-             jaccard_dissimilarity, modes2, 2, True, None,
+    _lshKModes(data2, 2, n_points, n_attrs, 10,
+               jaccard_dissimilarity, modes2, 2, True, None,
              'timing', '/home/heydar/me/BSC/FinalPorject/lsh/src/benchmark/local/Result/t2')
